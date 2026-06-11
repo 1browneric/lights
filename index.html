@@ -248,20 +248,41 @@ async function findWriteChar(server){
   throw new Error('connected, but no known LED write channel found');
 }
 
+// Turn any thrown value ‚Äî even a non-standard/empty one ‚Äî into readable text
+function describeErr(e){
+  try{
+    if(e === undefined || e === null) return 'empty error ‚Äî likely a denied Bluetooth permission (enable Bluetooth for Bluefy in iOS Settings) or an unsupported request option';
+    var p = ['type=' + (typeof e)];
+    if(e.name) p.push('name=' + e.name);
+    if(e.message) p.push('msg=' + e.message);
+    var s = String(e); if(s && s !== '[object Object]') p.push(s);
+    try{ var k = Object.keys(e); if(k.length) p.push('keys=' + k.join(',')); }catch(_){}
+    try{ var j = JSON.stringify(e); if(j && j !== '{}' && j !== 'null') p.push(j); }catch(_){}
+    return p.join(' | ');
+  }catch(_){ return 'unprintable error'; }
+}
+
 async function connect(){
   try{
     if(!navigator.bluetooth){
-      setStatus('NO Web Bluetooth here', false);
-      alert('No Web Bluetooth in this browser.\n\nOpen this page INSIDE the Bluefy app ‚Äî type the URL into Bluefy\'s own address bar (not Safari) ‚Äî and make sure Bluefy has Bluetooth permission in iOS Settings > Bluefy.');
+      setStatus('NO Web Bluetooth', false);
+      alert('No Web Bluetooth in this browser.\n\nOpen this page INSIDE the Bluefy app (type the URL into Bluefy\'s own address bar, not Safari), and enable Bluetooth for Bluefy in iOS Settings.');
       return;
     }
-    setStatus('opening picker‚Ä¶', false);
-    // Show ALL nearby devices so the strip always appears regardless of its name
+    setStatus('opening picker...', false);
+    // Bluefy-safe: filters by common LED-strip services + name prefixes
+    // (acceptAllDevices throws on some Bluefy versions).
     device = await navigator.bluetooth.requestDevice({
-      acceptAllDevices:true,
+      filters:[
+        {services:[0xfff0]}, {services:[0xffe0]}, {services:[0xffe5]}, {services:[0xff00]},
+        {namePrefix:'ELK'}, {namePrefix:'BLEDOM'}, {namePrefix:'LED'}, {namePrefix:'BLE'},
+        {namePrefix:'MELK'}, {namePrefix:'QHM'}, {namePrefix:'SP'}, {namePrefix:'Triones'},
+        {namePrefix:'LEDnet'}, {namePrefix:'ISP'}, {namePrefix:'KS'}, {namePrefix:'Gov'},
+        {namePrefix:'Mohuan'}, {namePrefix:'iLED'}, {namePrefix:'LedBle'}, {namePrefix:'MELK-'}
+      ],
       optionalServices:ALL_SERVICES
     });
-    setStatus('connecting to ' + (device.name || 'device') + '‚Ä¶', false);
+    setStatus('connecting to ' + (device.name || 'device') + '...', false);
     device.addEventListener('gattserverdisconnected', ()=>{
       setStatus('disconnected', false);
       charac = null;
@@ -271,9 +292,9 @@ async function connect(){
     setStatus('connected: ' + (device.name || 'device'), true);
   }catch(e){
     setStatus('disconnected', false);
-    if(e.name === 'NotFoundError') return;          // user dismissed the picker
-    setStatus('FAILED: ' + e.name, false);
-    alert('Connect failed [' + e.name + ']: ' + e.message);
+    if(e && e.name === 'NotFoundError') return;     // user dismissed the picker
+    setStatus('FAIL: ' + describeErr(e), false);
+    alert('Connect failed:\n' + describeErr(e));
   }
 }
 
