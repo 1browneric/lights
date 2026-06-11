@@ -227,15 +227,18 @@ function setStatus(text, on){
   statusEl.className = on ? 'on' : '';
 }
 
+// Bluefy/WebBLE only accepts full 128-bit UUID STRINGS, not 16-bit numbers.
+const u16 = x => '0000' + x.toString(16).padStart(4,'0') + '-0000-1000-8000-00805f9b34fb';
+
 // Known service/write-characteristic pairs across common BLE LED strips
 const GATT_CANDIDATES = [
-  {svc:0xfff0, chr:0xfff3},   // BLEDOM / ELK-BLEDOM
-  {svc:0xffe0, chr:0xffe1},   // HM-10 style
-  {svc:0xffe5, chr:0xffe9},   // Triones / Zengge
-  {svc:0xff00, chr:0xff02},
-  {svc:0xfff0, chr:0xfff4},
+  {svc:u16(0xfff0), chr:u16(0xfff3)},   // BLEDOM / ELK-BLEDOM
+  {svc:u16(0xffe0), chr:u16(0xffe1)},   // HM-10 style
+  {svc:u16(0xffe5), chr:u16(0xffe9)},   // Triones / Zengge
+  {svc:u16(0xff00), chr:u16(0xff02)},
+  {svc:u16(0xfff0), chr:u16(0xfff4)},
 ];
-const ALL_SERVICES = [0xfff0,0xffe0,0xffe5,0xff00,0xfff3];
+const ALL_SERVICES = [0xfff0,0xffe0,0xffe5,0xff00,0xfff3].map(u16);
 
 async function findWriteChar(server){
   for(const c of GATT_CANDIDATES){
@@ -274,7 +277,7 @@ async function connect(){
     // (acceptAllDevices throws on some Bluefy versions).
     device = await navigator.bluetooth.requestDevice({
       filters:[
-        {services:[0xfff0]}, {services:[0xffe0]}, {services:[0xffe5]}, {services:[0xff00]},
+        {services:[u16(0xfff0)]}, {services:[u16(0xffe0)]}, {services:[u16(0xffe5)]}, {services:[u16(0xff00)]},
         {namePrefix:'ELK'}, {namePrefix:'BLEDOM'}, {namePrefix:'LED'}, {namePrefix:'BLE'},
         {namePrefix:'MELK'}, {namePrefix:'QHM'}, {namePrefix:'SP'}, {namePrefix:'Triones'},
         {namePrefix:'LEDnet'}, {namePrefix:'ISP'}, {namePrefix:'KS'}, {namePrefix:'Gov'},
