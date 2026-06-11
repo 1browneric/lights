@@ -227,27 +227,53 @@ function setStatus(text, on){
   statusEl.className = on ? 'on' : '';
 }
 
+// Known service/write-characteristic pairs across common BLE LED strips
+const GATT_CANDIDATES = [
+  {svc:0xfff0, chr:0xfff3},   // BLEDOM / ELK-BLEDOM
+  {svc:0xffe0, chr:0xffe1},   // HM-10 style
+  {svc:0xffe5, chr:0xffe9},   // Triones / Zengge
+  {svc:0xff00, chr:0xff02},
+  {svc:0xfff0, chr:0xfff4},
+];
+const ALL_SERVICES = [0xfff0,0xffe0,0xffe5,0xff00,0xfff3];
+
+async function findWriteChar(server){
+  for(const c of GATT_CANDIDATES){
+    try{
+      const s  = await server.getPrimaryService(c.svc);
+      const ch = await s.getCharacteristic(c.chr);
+      return ch;
+    }catch(e){ /* try next candidate */ }
+  }
+  throw new Error('connected, but no known LED write channel found');
+}
+
 async function connect(){
   try{
     if(!navigator.bluetooth){
-      alert('Bluetooth not available in this browser. Open this page in the Bluefy app.');
+      setStatus('NO Web Bluetooth here', false);
+      alert('No Web Bluetooth in this browser.\n\nOpen this page INSIDE the Bluefy app ‚Äî type the URL into Bluefy\'s own address bar (not Safari) ‚Äî and make sure Bluefy has Bluetooth permission in iOS Settings > Bluefy.');
       return;
     }
+    setStatus('opening picker‚Ä¶', false);
+    // Show ALL nearby devices so the strip always appears regardless of its name
     device = await navigator.bluetooth.requestDevice({
-      filters:[{namePrefix:'BLEDOM'},{namePrefix:'ELK'}],
-      optionalServices:[SERVICE]
+      acceptAllDevices:true,
+      optionalServices:ALL_SERVICES
     });
+    setStatus('connecting to ' + (device.name || 'device') + '‚Ä¶', false);
     device.addEventListener('gattserverdisconnected', ()=>{
       setStatus('disconnected', false);
       charac = null;
     });
     const server = await device.gatt.connect();
-    const service = await server.getPrimaryService(SERVICE);
-    charac = await service.getCharacteristic(WRITE_CHAR);
-    setStatus('connected: ' + (device.name || 'BLEDOM'), true);
+    charac = await findWriteChar(server);
+    setStatus('connected: ' + (device.name || 'device'), true);
   }catch(e){
     setStatus('disconnected', false);
-    if(e.name !== 'NotFoundError') alert('Connect failed: ' + e.message);
+    if(e.name === 'NotFoundError') return;          // user dismissed the picker
+    setStatus('FAILED: ' + e.name, false);
+    alert('Connect failed [' + e.name + ']: ' + e.message);
   }
 }
 
