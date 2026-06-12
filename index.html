@@ -110,7 +110,24 @@
   }
   .pattern-card .dots{display:flex;gap:5px;margin-top:8px;}
   .pattern-card .dot{width:14px;height:14px;border-radius:50%;}
-  .pattern-card.active{border-color:var(--gold);}
+  .pattern-card.active{
+    border-color:var(--gold);
+    background:#1b2335;
+    box-shadow:0 0 0 1px var(--gold), 0 0 16px -3px var(--gold);
+  }
+  .swatch{transition:transform .12s, box-shadow .12s;}
+  .swatch.selected{
+    border-color:var(--gold);
+    box-shadow:0 0 0 3px var(--gold), 0 0 18px -2px var(--gold);
+    transform:scale(1.09);
+  }
+  /* 3-color mix */
+  .mix-colors{display:flex;gap:12px;justify-content:space-around;margin-bottom:4px;}
+  .mix-colors input[type=color]{width:64px;height:50px;}
+  .speed-row{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-top:14px;margin-bottom:2px;}
+  .mix-styles{display:flex;gap:10px;margin-top:12px;}
+  .mix-styles button{flex:1;font-size:14px;padding:11px;background:var(--line);}
+  .mix-styles button.sel{background:var(--blue);box-shadow:0 0 0 1px var(--blue),0 0 12px -3px var(--blue);}
   /* custom builder */
   .step{
     display:flex;align-items:center;gap:10px;
@@ -192,6 +209,24 @@
     <div class="label">Patterns</div>
     <div class="patterns" id="patternGrid"></div>
     <button id="stopBtn" class="btn-red" style="margin-top:12px;">Stop pattern</button>
+  </section>
+
+  <section>
+    <div class="label">3-Color Mix</div>
+    <div class="mix-colors">
+      <input type="color" id="mix1" value="#0033CC">
+      <input type="color" id="mix2" value="#FFFFFF">
+      <input type="color" id="mix3" value="#FF0000">
+    </div>
+    <div class="speed-row"><span>Slow</span><span>Fast</span></div>
+    <input type="range" id="mixSpeed" min="1" max="100" value="30">
+    <div class="mix-styles">
+      <button id="mixFade" class="sel">Fade</button>
+      <button id="mixSwitch">Switch</button>
+      <button id="mixPulse">Pulse</button>
+    </div>
+    <button id="mixRun" class="btn-blue" style="margin-top:12px;">Run mix</button>
+    <div class="note">Pick three colors, drag the slider for how fast they change, and choose how: Fade (smooth blend), Switch (hard change), or Pulse (glow in and out).</div>
   </section>
 
   <section>
@@ -355,7 +390,7 @@ SWATCHES.forEach(hex=>{
   b.className = 'swatch';
   b.style.background = hex;
   if(hex==='#000000') b.style.borderColor = '#444';
-  b.onclick = ()=>{ stopPattern(); const [r,g,bl]=hexToRgb(hex); setColor(r,g,bl); };
+  b.onclick = ()=>{ stopPattern(); b.classList.add('selected'); const [r,g,bl]=hexToRgb(hex); setColor(r,g,bl); };
   swEl.appendChild(b);
 });
 document.getElementById('picker').addEventListener('input', e=>{
@@ -373,6 +408,7 @@ document.getElementById('bright').addEventListener('input', e=>{
 function stopPattern(){
   if(patternTimer){ clearTimeout(patternTimer); patternTimer = null; }
   document.querySelectorAll('.pattern-card').forEach(c=>c.classList.remove('active'));
+  document.querySelectorAll('.swatch.selected').forEach(s=>s.classList.remove('selected'));
 }
 
 function runPattern(steps, fade){
@@ -416,11 +452,12 @@ function runPattern(steps, fade){
 const RED=[255,0,0], WHITE=[255,255,255], BLUE=[0,51,204];
 
 function modeSlowGlow(){
+  // very slow, gentle crossfade between red / white / blue
   runPattern([
-    {color:'#FF0000', ms:2500},
-    {color:'#FFFFFF', ms:2500},
-    {color:'#0033CC', ms:2500},
-    {color:'#FFFFFF', ms:2500}
+    {color:'#FF0000', ms:7000},
+    {color:'#FFFFFF', ms:7000},
+    {color:'#0033CC', ms:7000},
+    {color:'#FFFFFF', ms:7000}
   ], true);
 }
 
@@ -595,6 +632,55 @@ document.getElementById('runCustom').onclick = ()=>{
   runPattern(customSteps.map(s=>({...s})), fadeOn);
 };
 renderSteps();
+
+/* ============ 3-color mix ============ */
+function sliderToMs(v){
+  const t = (v-1)/99;                                 // 0..1
+  return Math.round(8000 * Math.pow(250/8000, t));    // slow 8000ms -> fast 250ms
+}
+let mixStyle = 'fade';
+const mixBtns = {
+  fade:   document.getElementById('mixFade'),
+  switch: document.getElementById('mixSwitch'),
+  pulse:  document.getElementById('mixPulse')
+};
+function setMixStyle(s){
+  mixStyle = s;
+  Object.keys(mixBtns).forEach(k=>mixBtns[k].classList.toggle('sel', k===s));
+}
+mixBtns.fade.onclick   = ()=>setMixStyle('fade');
+mixBtns.switch.onclick = ()=>setMixStyle('switch');
+mixBtns.pulse.onclick  = ()=>setMixStyle('pulse');
+setMixStyle('fade');
+
+// Pulse: glow each color up from black and back down, then the next
+function runMixPulse(colors, ms){
+  stopPattern();
+  const TICK = 60;
+  const half = Math.max(2, Math.floor((ms/2)/TICK));
+  let ci=0, t=0, dir=1;
+  const step=()=>{
+    t+=dir;
+    const p=Math.max(0,Math.min(1,t/half));
+    const [r,g,b]=hexToRgb(colors[ci]);
+    setColor(Math.round(r*p), Math.round(g*p), Math.round(b*p));
+    if(t>=half) dir=-1;
+    else if(t<=0 && dir===-1){ dir=1; ci=(ci+1)%colors.length; }
+    patternTimer=setTimeout(step,TICK);
+  };
+  step();
+}
+document.getElementById('mixRun').onclick = ()=>{
+  stopPattern();
+  const colors=[
+    document.getElementById('mix1').value,
+    document.getElementById('mix2').value,
+    document.getElementById('mix3').value
+  ];
+  const ms=sliderToMs(parseInt(document.getElementById('mixSpeed').value));
+  if(mixStyle==='pulse') runMixPulse(colors, ms);
+  else runPattern(colors.map(c=>({color:c, ms})), mixStyle==='fade');
+};
 
 /* ============ buttons ============ */
 document.getElementById('connectBtn').onclick = connect;
