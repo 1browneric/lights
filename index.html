@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- build: 2026-06-11-fx1 (built-in effects, fade-hold, auto-reconnect, ring fix) -->
+<!-- build: 2026-06-11-fx2 (unified colors x motion, live effect browse, Royals blue/white) -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -129,6 +129,10 @@
   .mix-styles{display:flex;gap:10px;margin-top:12px;}
   .mix-styles button{flex:1;font-size:14px;padding:11px;background:var(--line);}
   .mix-styles button.sel{background:var(--blue);box-shadow:0 0 0 1px var(--blue),0 0 12px -3px var(--blue);}
+  /* motion picker */
+  .motion-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+  .motion-grid button{font-size:14px;padding:12px 6px;background:var(--line);}
+  .motion-grid button.sel{background:var(--blue);box-shadow:0 0 0 1px var(--blue),0 0 12px -3px var(--blue);}
   /* built-in firmware effects */
   .effect-row{display:flex;align-items:center;gap:12px;margin-bottom:4px;}
   .effect-row button{flex:none;width:56px;font-size:24px;padding:8px;background:var(--line);}
@@ -206,18 +210,34 @@
   </section>
 
   <section>
-    <div class="label">Fourth of July</div>
-    <div class="patterns" id="julyGrid"></div>
+    <div class="label">Patterns ¬∑ pick colors, then motion</div>
+    <div class="patterns" id="paletteGrid"></div>
+    <div class="picker-row" id="customRow" style="display:none;">
+      <input type="color" id="cc1" value="#0033CC">
+      <input type="color" id="cc2" value="#FFFFFF">
+      <input type="color" id="cc3" value="#FF0000">
+      <span>Your colors</span>
+    </div>
+
+    <div class="label" style="margin-top:18px;">Motion</div>
+    <div class="motion-grid" id="motionRow">
+      <button data-m="fade" class="sel">Fade</button>
+      <button data-m="switch">Switch</button>
+      <button data-m="pulse">Pulse</button>
+      <button data-m="chase">Chase</button>
+      <button data-m="firework">Firework</button>
+    </div>
+    <div class="speed-row"><span>Super slow</span><span>Fast</span></div>
+    <input type="range" id="patSpeed" min="1" max="100" value="40">
+    <div class="row" style="margin-top:12px;">
+      <button id="patRun" class="btn-blue">Run</button>
+      <button id="patStop" class="btn-red">Stop</button>
+    </div>
+    <div class="note">Pick a color set (or <b>Custom</b>), pick how it moves, then Run. Drag the speed slider ‚Äî or tap a different color/motion ‚Äî while it runs to change it live. These play <b>while the app is open</b>.</div>
   </section>
 
   <section>
-    <div class="label">Patterns</div>
-    <div class="patterns" id="patternGrid"></div>
-    <button id="stopBtn" class="btn-red" style="margin-top:12px;">Stop pattern</button>
-  </section>
-
-  <section>
-    <div class="label">Built-in effects ¬∑ keep running</div>
+    <div class="label">Leave it running ¬∑ on the strip</div>
     <div class="effect-row">
       <button id="fxDown">&minus;</button>
       <div id="fxLabel">Effect 1</div>
@@ -225,26 +245,7 @@
     </div>
     <div class="speed-row"><span>Slow</span><span>Fast</span></div>
     <input type="range" id="fxSpeed" min="1" max="100" value="50">
-    <button id="fxRun" class="btn-blue" style="margin-top:12px;">Run on strip</button>
-    <div class="note">These run on the light strip itself, so they <b>keep going even after you close the app</b>. There are 29 built-in effects ‚Äî tap +/&minus; to browse and find your favorites. (Solid colors, team Patterns, and Fourth of July are drawn by the phone, so those stop when the app closes.)</div>
-  </section>
-
-  <section>
-    <div class="label">3-Color Mix</div>
-    <div class="mix-colors">
-      <input type="color" id="mix1" value="#0033CC">
-      <input type="color" id="mix2" value="#FFFFFF">
-      <input type="color" id="mix3" value="#FF0000">
-    </div>
-    <div class="speed-row"><span>Slow</span><span>Fast</span></div>
-    <input type="range" id="mixSpeed" min="1" max="100" value="30">
-    <div class="mix-styles">
-      <button id="mixFade" class="sel">Fade</button>
-      <button id="mixSwitch">Switch</button>
-      <button id="mixPulse">Pulse</button>
-    </div>
-    <button id="mixRun" class="btn-blue" style="margin-top:12px;">Run mix</button>
-    <div class="note">Pick three colors, drag the slider for how fast they change, and choose how: Fade (smooth blend), Switch (hard change), or Pulse (glow in and out).</div>
+    <div class="note">These run on the strip's own chip, so whatever you leave showing <b>keeps going after you close the app</b>. Tap +/&minus; to step through the 29 built-in effects ‚Äî each one plays on the strip the moment you select it, so just watch and stop on the one you like. (Solid colors stay on after close too. The Patterns above are drawn by the phone, so those stop when the app closes ‚Äî that's a limit of the strip.)</div>
   </section>
 
   <section>
@@ -271,7 +272,7 @@ const WRITE_CHAR = 0xfff3;
 let device = null, charac = null;
 let patternTimer = null;
 let lastWrite = 0;
-let mixActive = false;
+let patActive = false;
 let reconnecting = false;
 
 const statusEl = document.getElementById('status');
@@ -487,7 +488,7 @@ function clearHighlights(){
 function stopPattern(){
   clearTimer();
   clearHighlights();
-  mixActive = false;
+  patActive = false;
 }
 
 function runPattern(steps, fade){
@@ -507,7 +508,7 @@ function runPattern(steps, fade){
     // then crossfade to the next over the second half. The hold is what makes
     // every color clearly visible for an equal amount of time (a pure crossfade
     // lets bright colors flash by while dim ones appear to linger).
-    const TICK = 60, HOLD = 0.5;
+    const TICK = 60, HOLD = 0.65;   // hold each color 65% of its slot, fade the rest
     const cycle = ()=>{
       const cur = hexToRgb(steps[i % steps.length].color);
       const nxt = hexToRgb(steps[(i+1) % steps.length].color);
@@ -534,139 +535,116 @@ function runPattern(steps, fade){
   }
 }
 
-/* ============ Fourth of July modes ============ */
-const RED=[255,0,0], WHITE=[255,255,255], BLUE=[0,51,204];
+/* ============ unified patterns: color set √ó motion ============ */
+// Color sets. "Custom" pulls live values from the three pickers.
+const PALETTES = [
+  {name:'Royals',   colors:['#004687','#FFFFFF']},
+  {name:'Chiefs',   colors:['#E31837','#FFB81C']},
+  {name:'Jayhawks', colors:['#0051BA','#E8000D']},
+  {name:'Current',  colors:['#64CCC9','#C8102E']},
+  {name:'July',     colors:['#FF0000','#FFFFFF','#0033CC']},
+  {name:'Rainbow',  colors:['#FF0000','#FF8800','#FFFF00','#00CC44','#0066FF','#FFFFFF']},
+  {name:'Ocean',    colors:['#003B73','#0077B6','#64CCC9']},
+  {name:'Custom',   colors:null},   // null => read the pickers
+];
 
-function modeSlowGlow(){
-  // very slow, gentle crossfade between red / white / blue
-  runPattern([
-    {color:'#FF0000', ms:7000},
-    {color:'#FFFFFF', ms:7000},
-    {color:'#0033CC', ms:7000},
-    {color:'#FFFFFF', ms:7000}
-  ], true);
+let activePalette = PALETTES[0];   // selected color set
+let activeMotion  = 'fade';        // selected motion
+// patActive (declared up top) = is a phone-driven pattern currently running?
+
+const customRow = document.getElementById('customRow');
+function currentColors(){
+  if(activePalette.colors) return activePalette.colors;
+  return [ document.getElementById('cc1').value,
+           document.getElementById('cc2').value,
+           document.getElementById('cc3').value ];
 }
 
-function modePulse(){
-  // fade each color in from dark and back out, then next color
-  const cols=[RED,WHITE,BLUE];
-  const TICK=50, HALF=900, ticks=HALF/TICK;
-  let ci=0, t=0, dir=1;
-  const step=()=>{
-    t+=dir;
-    const p=Math.max(0,Math.min(1,t/ticks));
-    const c=cols[ci];
-    setColor(Math.round(c[0]*p),Math.round(c[1]*p),Math.round(c[2]*p));
-    if(t>=ticks) dir=-1;
-    else if(t<=0 && dir===-1){ dir=1; ci=(ci+1)%cols.length; }
-    patternTimer=setTimeout(step,TICK);
-  };
-  step();
+// Speed slider -> milliseconds per color. Slow end is *very* slow (24s) so
+// "slow glow" / "super-super-slow glow" are just Fade near the slow end.
+function patMs(){
+  const v = parseInt(document.getElementById('patSpeed').value);
+  const t = (v-1)/99;                                  // 0..1
+  return Math.round(24000 * Math.pow(220/24000, t));   // 24000ms slow -> 220ms fast
 }
 
-function modeChase(){
-  // fast hard cuts ‚Äî the single-zone version of a marquee chase
-  runPattern([
-    {color:'#FF0000', ms:170},
-    {color:'#FFFFFF', ms:170},
-    {color:'#0033CC', ms:170}
-  ], false);
-}
-
-function modeFirecracker(){
-  // hold red or blue, then 1-3 quick white pops at random
-  const bases=[BLUE,RED];
-  let bi=0;
-  const loop=()=>{
-    const b=bases[bi%2];
-    setColor(b[0],b[1],b[2]);
-    patternTimer=setTimeout(()=>{
-      let pops=1+Math.floor(Math.random()*3);
-      const pop=()=>{
+// ---- motion runners (each works on ANY list of colors) ----
+function motionFirework(colors, ms){
+  clearTimer();
+  const bases = colors.length ? colors : ['#0033CC','#FF0000'];
+  const gap = Math.max(250, ms);          // slower slider => longer calm between bursts
+  let bi = 0;
+  const loop = ()=>{
+    const [br,bg,bb] = hexToRgb(bases[bi % bases.length]);
+    setColor(br,bg,bb);
+    patternTimer = setTimeout(()=>{
+      let pops = 1 + Math.floor(Math.random()*3);
+      const pop = ()=>{
         setColor(255,255,255);
-        patternTimer=setTimeout(()=>{
-          setColor(b[0],b[1],b[2]);
+        patternTimer = setTimeout(()=>{
+          setColor(br,bg,bb);
           pops--;
-          if(pops>0) patternTimer=setTimeout(pop,90);
-          else { bi++; patternTimer=setTimeout(loop,300+Math.random()*600); }
+          if(pops>0) patternTimer = setTimeout(pop,90);
+          else { bi++; patternTimer = setTimeout(loop, gap*0.4 + Math.random()*gap); }
         },70);
       };
       pop();
-    },400+Math.random()*700);
+    }, gap*0.5 + Math.random()*gap);
   };
   loop();
 }
 
-function modeStars(){
-  // deep blue night with random white twinkles
-  const loop=()=>{
-    setColor(0,30,160);
-    patternTimer=setTimeout(()=>{
-      setColor(255,255,255);
-      patternTimer=setTimeout(loop,80);
-    },500+Math.random()*1400);
-  };
-  loop();
+// Run the currently selected color set + motion at the current speed.
+function runPat(){
+  clearTimer();
+  patActive = true;
+  const colors = currentColors();
+  const ms = patMs();
+  switch(activeMotion){
+    case 'switch':   runPattern(colors.map(c=>({color:c, ms})), false); break;
+    case 'pulse':    runMixPulse(colors, ms); break;
+    case 'chase':    runPattern(colors.map(c=>({color:c, ms:Math.max(60, Math.round(ms*0.18))})), false); break;
+    case 'firework': motionFirework(colors, ms); break;
+    default:         runPattern(colors.map(c=>({color:c, ms})), true);  // fade
+  }
 }
 
-function modeFinale(){
-  // accelerating red-white-blue strobe that builds and resets
-  const cols=[RED,WHITE,BLUE];
-  let i=0, delay=600;
-  const step=()=>{
-    const c=cols[i%3];
-    setColor(c[0],c[1],c[2]);
-    i++;
-    delay=Math.max(90, delay*0.93);
-    if(delay<=90 && i%24===0) delay=600;
-    patternTimer=setTimeout(step,delay);
-  };
-  step();
-}
-
-const JULY_MODES=[
-  {name:'Slow glow',  dots:['#FF0000','#FFFFFF','#0033CC'], run:modeSlowGlow},
-  {name:'Pulse',      dots:['#FF0000','#FFFFFF','#0033CC'], run:modePulse},
-  {name:'Chase',      dots:['#FF0000','#FFFFFF','#0033CC'], run:modeChase},
-  {name:'Firecracker',dots:['#0033CC','#FFFFFF','#FF0000'], run:modeFirecracker},
-  {name:'Starlight',  dots:['#001EA0','#FFFFFF'],           run:modeStars},
-  {name:'Finale',     dots:['#FF0000','#FFFFFF','#0033CC'], run:modeFinale},
-];
-const julyGrid=document.getElementById('julyGrid');
-JULY_MODES.forEach(m=>{
-  const card=document.createElement('button');
-  card.className='pattern-card';
-  card.innerHTML=`${m.name}<div class="dots">${m.dots.map(c=>`<div class="dot" style="background:${c}"></div>`).join('')}</div>`;
-  card.onclick=()=>{
-    stopPattern();
-    card.classList.add('active');
-    m.run();
-  };
-  julyGrid.appendChild(card);
-});
-
-/* ============ canned patterns ============ */
-const PRESETS = [
-  {name:'Royals', colors:['#004687','#FFFFFF','#C09A5B'], ms:900, fade:false},
-  {name:'Chiefs', colors:['#E31837','#FFB81C'], ms:800, fade:false},
-  {name:'Jayhawks', colors:['#0051BA','#E8000D'], ms:900, fade:false},
-  {name:'Current', colors:['#64CCC9','#C8102E'], ms:900, fade:false},
-  {name:'Slow rainbow', colors:['#FF0000','#FF8800','#FFFF00','#00CC44','#0066FF','#FFFFFF'], ms:2200, fade:true},
-  {name:'Ocean fade', colors:['#003B73','#0077B6','#64CCC9'], ms:2500, fade:true},
-];
-const grid = document.getElementById('patternGrid');
-PRESETS.forEach(p=>{
+// ---- color-set cards ----
+const paletteGrid = document.getElementById('paletteGrid');
+PALETTES.forEach(p=>{
   const card = document.createElement('button');
   card.className = 'pattern-card';
-  card.innerHTML = `${p.name}<div class="dots">${p.colors.map(c=>`<div class="dot" style="background:${c}"></div>`).join('')}</div>`;
+  const dots = (p.colors || ['#0033CC','#FFFFFF','#FF0000'])
+    .map(c=>`<div class="dot" style="background:${c}"></div>`).join('');
+  card.innerHTML = `${p.name}<div class="dots">${dots}</div>`;
   card.onclick = ()=>{
-    stopPattern();
+    activePalette = p;
+    document.querySelectorAll('#paletteGrid .pattern-card').forEach(c=>c.classList.remove('active'));
     card.classList.add('active');
-    runPattern(p.colors.map(c=>({color:c, ms:p.ms})), p.fade);
+    customRow.style.display = p.colors ? 'none' : 'flex';
+    if(patActive) runPat();          // live swap while running
   };
-  grid.appendChild(card);
+  paletteGrid.appendChild(card);
 });
-document.getElementById('stopBtn').onclick = stopPattern;
+paletteGrid.firstChild.classList.add('active');   // default Royals selected
+
+// ---- motion buttons ----
+const motionRow = document.getElementById('motionRow');
+motionRow.querySelectorAll('button').forEach(btn=>{
+  btn.onclick = ()=>{
+    activeMotion = btn.dataset.m;
+    motionRow.querySelectorAll('button').forEach(b=>b.classList.toggle('sel', b===btn));
+    if(patActive) runPat();          // live swap while running
+  };
+});
+
+// ---- run / stop / live speed ----
+document.getElementById('patRun').onclick  = ()=>{
+  // keep the color-set ring; clear only the timer, then run
+  patActive = true; clearTimer(); runPat();
+};
+document.getElementById('patStop').onclick = ()=>{ patActive = false; clearTimer(); };
+document.getElementById('patSpeed').addEventListener('input', ()=>{ if(patActive) runPat(); });
 
 /* ============ custom builder ============ */
 const stepsEl = document.getElementById('steps');
@@ -719,28 +697,8 @@ document.getElementById('runCustom').onclick = ()=>{
 };
 renderSteps();
 
-/* ============ 3-color mix ============ */
-function sliderToMs(v){
-  const t = (v-1)/99;                                 // 0..1
-  return Math.round(8000 * Math.pow(250/8000, t));    // slow 8000ms -> fast 250ms
-}
-let mixStyle = 'fade';
-const mixBtns = {
-  fade:   document.getElementById('mixFade'),
-  switch: document.getElementById('mixSwitch'),
-  pulse:  document.getElementById('mixPulse')
-};
-function setMixStyle(s){
-  mixStyle = s;
-  Object.keys(mixBtns).forEach(k=>mixBtns[k].classList.toggle('sel', k===s));
-  if(mixActive) runMix();   // switch style live if a mix is already running
-}
-mixBtns.fade.onclick   = ()=>setMixStyle('fade');
-mixBtns.switch.onclick = ()=>setMixStyle('switch');
-mixBtns.pulse.onclick  = ()=>setMixStyle('pulse');
-setMixStyle('fade');
-
-// Pulse: glow each color up from black and back down, then the next
+/* ============ pulse motion (shared by the Pulse button) ============ */
+// Glow each color up from black and back down, then the next.
 function runMixPulse(colors, ms){
   clearTimer();
   const TICK = 60;
@@ -749,7 +707,7 @@ function runMixPulse(colors, ms){
   const step=()=>{
     t+=dir;
     const p=Math.max(0,Math.min(1,t/half));
-    const [r,g,b]=hexToRgb(colors[ci]);
+    const [r,g,b]=hexToRgb(colors[ci % colors.length]);
     setColor(Math.round(r*p), Math.round(g*p), Math.round(b*p));
     if(t>=half) dir=-1;
     else if(t<=0 && dir===-1){ dir=1; ci=(ci+1)%colors.length; }
@@ -757,41 +715,26 @@ function runMixPulse(colors, ms){
   };
   step();
 }
-function runMix(){
-  clearTimer();
-  mixActive = true;
-  const colors=[
-    document.getElementById('mix1').value,
-    document.getElementById('mix2').value,
-    document.getElementById('mix3').value
-  ];
-  const ms=sliderToMs(parseInt(document.getElementById('mixSpeed').value));
-  if(mixStyle==='pulse') runMixPulse(colors, ms);
-  else runPattern(colors.map(c=>({color:c, ms})), mixStyle==='fade');
-}
-document.getElementById('mixRun').onclick = ()=>{ stopPattern(); runMix(); };
-// Live speed: while a mix is running, dragging the slider restarts it at the
-// new speed instead of waiting for another "Run mix" tap.
-document.getElementById('mixSpeed').addEventListener('input', ()=>{ if(mixActive) runMix(); });
 
-/* ============ built-in firmware effects ============ */
-// These select the controller's own on-chip effects (command type 0x03).
-// They run on the strip, so they continue after the app is closed.
+/* ============ built-in firmware effects (run on the strip) ============ */
+// Command type 0x03 selects the controller's own on-chip effects, which keep
+// running after the phone disconnects. Stepping with +/- previews each one live.
 const FX_COUNT = 29;                 // modes 0x80..0x9c
 let fxNum = 1;
 const fxLabelEl = document.getElementById('fxLabel');
-function renderFx(){ fxLabelEl.textContent = 'Effect ' + fxNum; }
-document.getElementById('fxDown').onclick = ()=>{ fxNum = fxNum>1 ? fxNum-1 : FX_COUNT; renderFx(); };
-document.getElementById('fxUp').onclick   = ()=>{ fxNum = fxNum<FX_COUNT ? fxNum+1 : 1; renderFx(); };
-document.getElementById('fxSpeed').addEventListener('change', e=>{
-  writeRaw([0x7e,0x00,0x02, parseInt(e.target.value) & 0xff, 0x00,0x00,0x00,0x00,0xef]);
-});
-document.getElementById('fxRun').onclick = async ()=>{
-  stopPattern();                     // stop any phone-driven animation first
-  const sp = parseInt(document.getElementById('fxSpeed').value) & 0xff;
-  await writeRaw([0x7e,0x00,0x02, sp, 0x00,0x00,0x00,0x00,0xef]);           // speed
+function fxSpeedVal(){ return parseInt(document.getElementById('fxSpeed').value) & 0xff; }
+async function playEffect(){
+  patActive = false;                 // hand control to the strip
+  clearTimer();                      // stop any phone-driven animation
+  await writeRaw([0x7e,0x00,0x02, fxSpeedVal(), 0x00,0x00,0x00,0x00,0xef]);     // speed
   await writeRaw([0x7e,0x00,0x03, 0x80 + (fxNum-1), 0x03,0x00,0x00,0x00,0xef]); // mode
-};
+}
+function renderFx(){ fxLabelEl.textContent = 'Effect ' + fxNum; }
+document.getElementById('fxDown').onclick = ()=>{ fxNum = fxNum>1 ? fxNum-1 : FX_COUNT; renderFx(); playEffect(); };
+document.getElementById('fxUp').onclick   = ()=>{ fxNum = fxNum<FX_COUNT ? fxNum+1 : 1; renderFx(); playEffect(); };
+document.getElementById('fxSpeed').addEventListener('change', ()=>{
+  writeRaw([0x7e,0x00,0x02, fxSpeedVal(), 0x00,0x00,0x00,0x00,0xef]);
+});
 renderFx();
 
 /* ============ buttons ============ */
