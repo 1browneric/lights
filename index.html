@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!-- build: 2026-06-11-fx1 (built-in effects, fade-hold, auto-reconnect, ring fix) -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -128,6 +129,10 @@
   .mix-styles{display:flex;gap:10px;margin-top:12px;}
   .mix-styles button{flex:1;font-size:14px;padding:11px;background:var(--line);}
   .mix-styles button.sel{background:var(--blue);box-shadow:0 0 0 1px var(--blue),0 0 12px -3px var(--blue);}
+  /* built-in firmware effects */
+  .effect-row{display:flex;align-items:center;gap:12px;margin-bottom:4px;}
+  .effect-row button{flex:none;width:56px;font-size:24px;padding:8px;background:var(--line);}
+  .effect-row #fxLabel{flex:1;text-align:center;font-size:17px;font-weight:600;}
   /* custom builder */
   .step{
     display:flex;align-items:center;gap:10px;
@@ -212,6 +217,19 @@
   </section>
 
   <section>
+    <div class="label">Built-in effects ¬∑ keep running</div>
+    <div class="effect-row">
+      <button id="fxDown">&minus;</button>
+      <div id="fxLabel">Effect 1</div>
+      <button id="fxUp">+</button>
+    </div>
+    <div class="speed-row"><span>Slow</span><span>Fast</span></div>
+    <input type="range" id="fxSpeed" min="1" max="100" value="50">
+    <button id="fxRun" class="btn-blue" style="margin-top:12px;">Run on strip</button>
+    <div class="note">These run on the light strip itself, so they <b>keep going even after you close the app</b>. There are 29 built-in effects ‚Äî tap +/&minus; to browse and find your favorites. (Solid colors, team Patterns, and Fourth of July are drawn by the phone, so those stop when the app closes.)</div>
+  </section>
+
+  <section>
     <div class="label">3-Color Mix</div>
     <div class="mix-colors">
       <input type="color" id="mix1" value="#0033CC">
@@ -253,6 +271,8 @@ const WRITE_CHAR = 0xfff3;
 let device = null, charac = null;
 let patternTimer = null;
 let lastWrite = 0;
+let mixActive = false;
+let reconnecting = false;
 
 const statusEl = document.getElementById('status');
 const glow = document.getElementById('glow');
@@ -300,6 +320,42 @@ function describeErr(e){
   }catch(_){ return 'unprintable error'; }
 }
 
+// Reconnect to the strip without showing the picker, using a device the
+// browser already granted us on a previous visit. Returns true on success.
+async function tryKnownDevice(){
+  try{
+    if(!navigator.bluetooth || !navigator.bluetooth.getDevices) return false;
+    const known = await navigator.bluetooth.getDevices();
+    if(!known || !known.length) return false;
+    const savedId = localStorage.getItem('lastDeviceId');
+    device = known.find(d=>d.id===savedId) || known[0];
+    device.addEventListener('gattserverdisconnected', onDisconnect);
+    setStatus('reconnecting ' + (device.name || 'saved light') + '...', false);
+    const server = await device.gatt.connect();
+    charac = await findWriteChar(server);
+    setStatus('connected: ' + (device.name || 'device'), true);
+    localStorage.setItem('lastDeviceId', device.id);
+    return true;
+  }catch(e){ return false; }
+}
+
+// Fired when the strip drops. Try a few quiet reconnects before giving up.
+async function onDisconnect(){
+  charac = null;
+  setStatus('disconnected', false);
+  if(reconnecting || !device) return;
+  reconnecting = true;
+  for(let k=0; k<3; k++){
+    try{
+      const server = await device.gatt.connect();
+      charac = await findWriteChar(server);
+      setStatus('connected: ' + (device.name || 'device'), true);
+      break;
+    }catch(e){ await new Promise(r=>setTimeout(r,800)); }
+  }
+  reconnecting = false;
+}
+
 async function connect(){
   try{
     if(!navigator.bluetooth){
@@ -307,6 +363,8 @@ async function connect(){
       alert('No Web Bluetooth in this browser.\n\nOpen this page INSIDE the Bluefy app (type the URL into Bluefy\'s own address bar, not Safari), and enable Bluetooth for Bluefy in iOS Settings.');
       return;
     }
+    // Skip the picker if we already paired with this strip before.
+    if(await tryKnownDevice()) return;
     setStatus('opening picker...', false);
     const FILTERS = [
       {services:[u16(0xfff0)]}, {services:[u16(0xffe0)]}, {services:[u16(0xffe5)]}, {services:[u16(0xff00)]},
@@ -331,13 +389,11 @@ async function connect(){
       });
     }
     setStatus('connecting to ' + (device.name || 'device') + '...', false);
-    device.addEventListener('gattserverdisconnected', ()=>{
-      setStatus('disconnected', false);
-      charac = null;
-    });
+    device.addEventListener('gattserverdisconnected', onDisconnect);
     const server = await device.gatt.connect();
     charac = await findWriteChar(server);
     setStatus('connected: ' + (device.name || 'device'), true);
+    localStorage.setItem('lastDeviceId', device.id);   // remember for next time
   }catch(e){
     setStatus('disconnected', false);
     if(e && e.name === 'NotFoundError') return;     // user dismissed the picker
@@ -359,6 +415,18 @@ async function write(bytes){
   }catch(e){ /* swallow mid-pattern write errors */ }
 }
 
+// Un-throttled writer for one-off control commands (power, mode, speed) that
+// must never be dropped by the pattern-stream throttle above.
+async function writeRaw(bytes){
+  if(!charac) return;
+  lastWrite = Date.now();
+  const data = new Uint8Array(bytes);
+  try{
+    if(charac.writeValueWithoutResponse) await charac.writeValueWithoutResponse(data);
+    else await charac.writeValue(data);
+  }catch(e){ /* ignore */ }
+}
+
 function setColor(r,g,b, updateGlow=true){
   write([0x7e,0x00,0x05,0x03,r,g,b,0x00,0xef]);
   if(updateGlow){
@@ -366,11 +434,11 @@ function setColor(r,g,b, updateGlow=true){
     glow.style.boxShadow = `0 0 28px 3px rgba(${r},${g},${b},0.55)`;
   }
 }
-function setBrightness(v){ write([0x7e,0x00,0x01,v,0x00,0x00,0x00,0x00,0xef]); }
-function powerOn(){ write([0x7e,0x00,0x04,0xf0,0x00,0x01,0xff,0x00,0xef]); }
+function setBrightness(v){ writeRaw([0x7e,0x00,0x01,v,0x00,0x00,0x00,0x00,0xef]); }
+function powerOn(){ writeRaw([0x7e,0x00,0x04,0xf0,0x00,0x01,0xff,0x00,0xef]); }
 function powerOff(){
   stopPattern();
-  write([0x7e,0x00,0x04,0x00,0x00,0x00,0xff,0x00,0xef]);
+  writeRaw([0x7e,0x00,0x04,0x00,0x00,0x00,0xff,0x00,0xef]);
   glow.style.background = '#222';
   glow.style.boxShadow = 'none';
 }
@@ -405,14 +473,25 @@ document.getElementById('bright').addEventListener('input', e=>{
 });
 
 /* ============ pattern engine ============ */
-function stopPattern(){
+// Stop the running animation only ‚Äî leaves UI highlights alone.
+function clearTimer(){
   if(patternTimer){ clearTimeout(patternTimer); patternTimer = null; }
+}
+// Drop every selection ring / active card.
+function clearHighlights(){
   document.querySelectorAll('.pattern-card').forEach(c=>c.classList.remove('active'));
   document.querySelectorAll('.swatch.selected').forEach(s=>s.classList.remove('selected'));
 }
+// Full reset: stop the animation AND clear highlights. Used by the Stop button,
+// power-off, and at the very start of each tap (before the new highlight is set).
+function stopPattern(){
+  clearTimer();
+  clearHighlights();
+  mixActive = false;
+}
 
 function runPattern(steps, fade){
-  stopPattern();
+  clearTimer();                 // stop the old animation but KEEP the highlight
   let i = 0;
   if(!fade){
     const next = ()=>{
@@ -424,25 +503,32 @@ function runPattern(steps, fade){
     };
     next();
   }else{
-    // fade: interpolate from each step color to the next over the step duration
-    const TICK = 60;
-    let from = hexToRgb(steps[0].color);
+    // Fade with a hold: show each pure color for the first half of its step,
+    // then crossfade to the next over the second half. The hold is what makes
+    // every color clearly visible for an equal amount of time (a pure crossfade
+    // lets bright colors flash by while dim ones appear to linger).
+    const TICK = 60, HOLD = 0.5;
     const cycle = ()=>{
-      const s = steps[i % steps.length];
-      const to = hexToRgb(steps[(i+1) % steps.length].color);
-      const ticks = Math.max(2, Math.floor(s.ms / TICK));
-      let t = 0;
-      const stepFade = ()=>{
-        t++;
-        const p = t / ticks;
-        const r = Math.round(from[0] + (to[0]-from[0])*p);
-        const g = Math.round(from[1] + (to[1]-from[1])*p);
-        const b = Math.round(from[2] + (to[2]-from[2])*p);
-        setColor(r,g,b);
-        if(t < ticks){ patternTimer = setTimeout(stepFade, TICK); }
-        else { from = to; i++; patternTimer = setTimeout(cycle, 0); }
-      };
-      stepFade();
+      const cur = hexToRgb(steps[i % steps.length].color);
+      const nxt = hexToRgb(steps[(i+1) % steps.length].color);
+      const ms  = steps[i % steps.length].ms;
+      const holdMs = ms * HOLD;
+      const ticks  = Math.max(1, Math.floor((ms - holdMs) / TICK));
+      setColor(cur[0], cur[1], cur[2]);          // show the pure color...
+      patternTimer = setTimeout(()=>{            // ...hold it, then crossfade
+        let t = 0;
+        const stepFade = ()=>{
+          t++;
+          const p = t / ticks;
+          const r = Math.round(cur[0] + (nxt[0]-cur[0])*p);
+          const g = Math.round(cur[1] + (nxt[1]-cur[1])*p);
+          const b = Math.round(cur[2] + (nxt[2]-cur[2])*p);
+          setColor(r,g,b);
+          if(t < ticks){ patternTimer = setTimeout(stepFade, TICK); }
+          else { i++; patternTimer = setTimeout(cycle, 0); }
+        };
+        stepFade();
+      }, holdMs);
     };
     cycle();
   }
@@ -647,6 +733,7 @@ const mixBtns = {
 function setMixStyle(s){
   mixStyle = s;
   Object.keys(mixBtns).forEach(k=>mixBtns[k].classList.toggle('sel', k===s));
+  if(mixActive) runMix();   // switch style live if a mix is already running
 }
 mixBtns.fade.onclick   = ()=>setMixStyle('fade');
 mixBtns.switch.onclick = ()=>setMixStyle('switch');
@@ -655,7 +742,7 @@ setMixStyle('fade');
 
 // Pulse: glow each color up from black and back down, then the next
 function runMixPulse(colors, ms){
-  stopPattern();
+  clearTimer();
   const TICK = 60;
   const half = Math.max(2, Math.floor((ms/2)/TICK));
   let ci=0, t=0, dir=1;
@@ -670,8 +757,9 @@ function runMixPulse(colors, ms){
   };
   step();
 }
-document.getElementById('mixRun').onclick = ()=>{
-  stopPattern();
+function runMix(){
+  clearTimer();
+  mixActive = true;
   const colors=[
     document.getElementById('mix1').value,
     document.getElementById('mix2').value,
@@ -680,12 +768,40 @@ document.getElementById('mixRun').onclick = ()=>{
   const ms=sliderToMs(parseInt(document.getElementById('mixSpeed').value));
   if(mixStyle==='pulse') runMixPulse(colors, ms);
   else runPattern(colors.map(c=>({color:c, ms})), mixStyle==='fade');
+}
+document.getElementById('mixRun').onclick = ()=>{ stopPattern(); runMix(); };
+// Live speed: while a mix is running, dragging the slider restarts it at the
+// new speed instead of waiting for another "Run mix" tap.
+document.getElementById('mixSpeed').addEventListener('input', ()=>{ if(mixActive) runMix(); });
+
+/* ============ built-in firmware effects ============ */
+// These select the controller's own on-chip effects (command type 0x03).
+// They run on the strip, so they continue after the app is closed.
+const FX_COUNT = 29;                 // modes 0x80..0x9c
+let fxNum = 1;
+const fxLabelEl = document.getElementById('fxLabel');
+function renderFx(){ fxLabelEl.textContent = 'Effect ' + fxNum; }
+document.getElementById('fxDown').onclick = ()=>{ fxNum = fxNum>1 ? fxNum-1 : FX_COUNT; renderFx(); };
+document.getElementById('fxUp').onclick   = ()=>{ fxNum = fxNum<FX_COUNT ? fxNum+1 : 1; renderFx(); };
+document.getElementById('fxSpeed').addEventListener('change', e=>{
+  writeRaw([0x7e,0x00,0x02, parseInt(e.target.value) & 0xff, 0x00,0x00,0x00,0x00,0xef]);
+});
+document.getElementById('fxRun').onclick = async ()=>{
+  stopPattern();                     // stop any phone-driven animation first
+  const sp = parseInt(document.getElementById('fxSpeed').value) & 0xff;
+  await writeRaw([0x7e,0x00,0x02, sp, 0x00,0x00,0x00,0x00,0xef]);           // speed
+  await writeRaw([0x7e,0x00,0x03, 0x80 + (fxNum-1), 0x03,0x00,0x00,0x00,0xef]); // mode
 };
+renderFx();
 
 /* ============ buttons ============ */
 document.getElementById('connectBtn').onclick = connect;
 document.getElementById('onBtn').onclick = powerOn;
 document.getElementById('offBtn').onclick = powerOff;
+
+// Try to silently reconnect to the last strip on load (no picker). If the
+// browser blocks it without a tap, the Connect button does the same thing.
+window.addEventListener('load', ()=>{ tryKnownDevice(); });
 </script>
 </body>
 </html>
