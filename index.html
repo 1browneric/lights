@@ -273,18 +273,28 @@ async function connect(){
       return;
     }
     setStatus('opening picker...', false);
-    // Bluefy-safe: filters by common LED-strip services + name prefixes
-    // (acceptAllDevices throws on some Bluefy versions).
-    device = await navigator.bluetooth.requestDevice({
-      filters:[
-        {services:[u16(0xfff0)]}, {services:[u16(0xffe0)]}, {services:[u16(0xffe5)]}, {services:[u16(0xff00)]},
-        {namePrefix:'ELK'}, {namePrefix:'BLEDOM'}, {namePrefix:'LED'}, {namePrefix:'BLE'},
-        {namePrefix:'MELK'}, {namePrefix:'QHM'}, {namePrefix:'SP'}, {namePrefix:'Triones'},
-        {namePrefix:'LEDnet'}, {namePrefix:'ISP'}, {namePrefix:'KS'}, {namePrefix:'Gov'},
-        {namePrefix:'Mohuan'}, {namePrefix:'iLED'}, {namePrefix:'LedBle'}, {namePrefix:'MELK-'}
-      ],
-      optionalServices:ALL_SERVICES
-    });
+    const FILTERS = [
+      {services:[u16(0xfff0)]}, {services:[u16(0xffe0)]}, {services:[u16(0xffe5)]}, {services:[u16(0xff00)]},
+      {namePrefix:'ELK'}, {namePrefix:'BLEDOM'}, {namePrefix:'LED'}, {namePrefix:'BLE'},
+      {namePrefix:'MELK'}, {namePrefix:'QHM'}, {namePrefix:'SP'}, {namePrefix:'Triones'},
+      {namePrefix:'LEDnet'}, {namePrefix:'ISP'}, {namePrefix:'KS'}, {namePrefix:'Gov'},
+      {namePrefix:'Mohuan'}, {namePrefix:'iLED'}, {namePrefix:'LedBle'}
+    ];
+    try{
+      // Show EVERY nearby device so the strip appears no matter what it
+      // advertises (works now that UUIDs are full 128-bit strings).
+      device = await navigator.bluetooth.requestDevice({
+        acceptAllDevices:true,
+        optionalServices:ALL_SERVICES
+      });
+    }catch(e1){
+      // Fallback for Bluefy builds that require a filters array
+      setStatus('filtered scan...', false);
+      device = await navigator.bluetooth.requestDevice({
+        filters:FILTERS,
+        optionalServices:ALL_SERVICES
+      });
+    }
     setStatus('connecting to ' + (device.name || 'device') + '...', false);
     device.addEventListener('gattserverdisconnected', ()=>{
       setStatus('disconnected', false);
