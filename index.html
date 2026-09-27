@@ -25,7 +25,7 @@
     min-height:100vh;
     padding-bottom:60px;
   }
-  /* Live glow bar ‚Äî mirrors current strip color */
+  /* Live glow bar — mirrors current strip color */
   #glow{
     position:sticky;top:0;z-index:10;
     height:10px;width:100%;
@@ -200,7 +200,7 @@
     <div class="swatches" id="swatches"></div>
     <div class="picker-row">
       <input type="color" id="picker" value="#004687">
-      <span>Any color ‚Äî tap to pick</span>
+      <span>Any color — tap to pick</span>
     </div>
   </section>
 
@@ -210,7 +210,7 @@
   </section>
 
   <section>
-    <div class="label">Patterns ¬∑ pick colors, then motion</div>
+    <div class="label">Patterns · pick colors, then motion</div>
     <div class="patterns" id="paletteGrid"></div>
     <div class="picker-row" id="customRow" style="display:none;">
       <input type="color" id="cc1" value="#0033CC">
@@ -233,11 +233,11 @@
       <button id="patRun" class="btn-blue">Run</button>
       <button id="patStop" class="btn-red">Stop</button>
     </div>
-    <div class="note">Pick a color set (or <b>Custom</b>), pick how it moves, then Run. Drag the speed slider ‚Äî or tap a different color/motion ‚Äî while it runs to change it live. These play <b>while the app is open</b>.</div>
+    <div class="note">Pick a color set (or <b>Custom</b>), pick how it moves, then Run. Drag the speed slider — or tap a different color/motion — while it runs to change it live. These play <b>while the app is open</b>.</div>
   </section>
 
   <section>
-    <div class="label">Leave it running ¬∑ on the strip</div>
+    <div class="label">Leave it running · on the strip</div>
     <div class="effect-row">
       <button id="fxDown">&minus;</button>
       <div id="fxLabel">Effect 1</div>
@@ -245,7 +245,7 @@
     </div>
     <div class="speed-row"><span>Slow</span><span>Fast</span></div>
     <input type="range" id="fxSpeed" min="1" max="100" value="50">
-    <div class="note">These run on the strip's own chip, so whatever you leave showing <b>keeps going after you close the app</b>. Tap +/&minus; to step through the 29 built-in effects ‚Äî each one plays on the strip the moment you select it, so just watch and stop on the one you like. (Solid colors stay on after close too. The Patterns above are drawn by the phone, so those stop when the app closes ‚Äî that's a limit of the strip.)</div>
+    <div class="note">These run on the strip's own chip, so whatever you leave showing <b>keeps going after you close the app</b>. Tap +/&minus; to step through the 29 built-in effects — each one plays on the strip the moment you select it, so just watch and stop on the one you like. (Solid colors stay on after close too. The Patterns above are drawn by the phone, so those stop when the app closes — that's a limit of the strip.)</div>
   </section>
 
   <section>
@@ -307,10 +307,10 @@ async function findWriteChar(server){
   throw new Error('connected, but no known LED write channel found');
 }
 
-// Turn any thrown value ‚Äî even a non-standard/empty one ‚Äî into readable text
+// Turn any thrown value — even a non-standard/empty one — into readable text
 function describeErr(e){
   try{
-    if(e === undefined || e === null) return 'empty error ‚Äî likely a denied Bluetooth permission (enable Bluetooth for Bluefy in iOS Settings) or an unsupported request option';
+    if(e === undefined || e === null) return 'empty error — likely a denied Bluetooth permission (enable Bluetooth for Bluefy in iOS Settings) or an unsupported request option';
     var p = ['type=' + (typeof e)];
     if(e.name) p.push('name=' + e.name);
     if(e.message) p.push('msg=' + e.message);
@@ -429,6 +429,7 @@ async function writeRaw(bytes){
 }
 
 function setColor(r,g,b, updateGlow=true){
+  if(r||g||b) lastRGB = [r,g,b];
   write([0x7e,0x00,0x05,0x03,r,g,b,0x00,0xef]);
   if(updateGlow){
     glow.style.background = `rgb(${r},${g},${b})`;
@@ -436,10 +437,26 @@ function setColor(r,g,b, updateGlow=true){
   }
 }
 function setBrightness(v){ writeRaw([0x7e,0x00,0x01,v,0x00,0x00,0x00,0x00,0xef]); }
-function powerOn(){ writeRaw([0x7e,0x00,0x04,0xf0,0x00,0x01,0xff,0x00,0xef]); }
-function powerOff(){
+let lastRGB = [255,255,255];
+async function powerOn(){
+  await writeRaw([0x7e,0x04,0x04,0xf0,0x00,0x01,0xff,0x00,0xef]);
+  await new Promise(r=>setTimeout(r,60));
+  await writeRaw([0x7e,0x00,0x04,0xf0,0x00,0x01,0xff,0x00,0xef]);
+  await new Promise(r=>setTimeout(r,60));
+  const [r,g,b] = lastRGB;               // power-off sends black, so restore the last color
+  await writeRaw([0x7e,0x00,0x05,0x03,r,g,b,0x00,0xef]);
+  glow.style.background = `rgb(${r},${g},${b})`;
+  glow.style.boxShadow = `0 0 28px 3px rgba(${r},${g},${b},0.55)`;
+}
+async function powerOff(){
   stopPattern();
-  writeRaw([0x7e,0x00,0x04,0x00,0x00,0x00,0xff,0x00,0xef]);
+  // Some BLEDOM firmwares ignore one off-packet variant, so send black first
+  // (always honored), then both known off packets.
+  await writeRaw([0x7e,0x00,0x05,0x03,0x00,0x00,0x00,0x00,0xef]);
+  await new Promise(r=>setTimeout(r,60));
+  await writeRaw([0x7e,0x04,0x04,0x00,0x00,0x00,0xff,0x00,0xef]);
+  await new Promise(r=>setTimeout(r,60));
+  await writeRaw([0x7e,0x00,0x04,0x00,0x00,0x00,0xff,0x00,0xef]);
   glow.style.background = '#222';
   glow.style.boxShadow = 'none';
 }
@@ -474,7 +491,7 @@ document.getElementById('bright').addEventListener('input', e=>{
 });
 
 /* ============ pattern engine ============ */
-// Stop the running animation only ‚Äî leaves UI highlights alone.
+// Stop the running animation only — leaves UI highlights alone.
 function clearTimer(){
   if(patternTimer){ clearTimeout(patternTimer); patternTimer = null; }
 }
@@ -535,7 +552,7 @@ function runPattern(steps, fade){
   }
 }
 
-/* ============ unified patterns: color set √ó motion ============ */
+/* ============ unified patterns: color set × motion ============ */
 // Color sets. "Custom" pulls live values from the three pickers.
 const PALETTES = [
   {name:'Royals',   colors:['#004687','#FFFFFF']},
