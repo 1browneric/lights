@@ -181,7 +181,7 @@
 <div id="glow"></div>
 
 <header>
-  <h1>Lights</h1>
+  <h1>Lights <span style="font-size:12px;opacity:.5">v3</span></h1>
   <div id="status">disconnected</div>
 </header>
 
@@ -425,7 +425,7 @@ async function writeRaw(bytes){
   try{
     if(charac.writeValueWithoutResponse) await charac.writeValueWithoutResponse(data);
     else await charac.writeValue(data);
-  }catch(e){ /* ignore */ }
+  }catch(e){ setStatus('write failed: ' + describeErr(e), true); }
 }
 
 function setColor(r,g,b, updateGlow=true){
@@ -450,6 +450,8 @@ async function powerOn(){
 }
 async function powerOff(){
   stopPattern();
+  if(!charac){ setStatus('not connected - tap Connect', false); return; }
+  setStatus('sending power off...', true);
   // Some BLEDOM firmwares ignore one off-packet variant, so send black first
   // (always honored), then both known off packets.
   await writeRaw([0x7e,0x00,0x05,0x03,0x00,0x00,0x00,0x00,0xef]);
@@ -457,6 +459,7 @@ async function powerOff(){
   await writeRaw([0x7e,0x04,0x04,0x00,0x00,0x00,0xff,0x00,0xef]);
   await new Promise(r=>setTimeout(r,60));
   await writeRaw([0x7e,0x00,0x04,0x00,0x00,0x00,0xff,0x00,0xef]);
+  setStatus('power off sent', true);
   glow.style.background = '#222';
   glow.style.boxShadow = 'none';
 }
